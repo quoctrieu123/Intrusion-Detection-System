@@ -15,6 +15,11 @@ final_data/test_df_prepared.parquet
 final_data/train_df_prepared.parquet
 final_data/valid_df_prepared.parquet
 final_data/chunk-based-split-3/
-model_final/
 catboost_info/
 final_data_tcp_based/
+final_data_http/
+data_meta_learner/
+ip-files-fillna-http/
+ip-files-fillna-tcp/
+oof/cnn_bilstm_oof/
+oof/gat_xg_boost_oof/
