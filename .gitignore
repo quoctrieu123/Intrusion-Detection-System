@@ -1,7 +1,5 @@
 IP-files/
 Z-wave-files/
-*.pth
-*.json
 ip-files-fillna-lstm/
 ip-files-test/
 ip-files-train-base/
