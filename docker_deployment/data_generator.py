@@ -7,7 +7,7 @@ from kafka import KafkaProducer
 SPEED_FACTOR = 1.0  # Chỉnh > 1.0 để tua nhanh thời gian (vd: 10.0 là nhanh gấp 10 lần)
 KAFKA_TOPIC = 'raw_flows'
 KAFKA_SERVER = 'localhost:9092'
-DATA_PATH = 'raw_data.parquet' # Thay đổi thành tên file thực tế của bạn
+DATA_PATH = r'C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\data_1s.parquet' # Thay đổi thành tên file thực tế của bạn
 
 def main():
     print(f"Đang đọc dữ liệu từ {DATA_PATH}...")

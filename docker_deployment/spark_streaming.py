@@ -5,6 +5,7 @@ import joblib
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, IntegerType
+from spark_schema import raw_schema, output_schema
 
 # ==========================================
 # 1. KHỞI TẠO SPARK SESSION
@@ -18,25 +19,10 @@ spark = SparkSession.builder \
 # 2. ĐỊNH NGHĨA SCHEMA (Mô phỏng)
 # ==========================================
 # Schema đầu vào (từ Topic raw_flows) - Thay bằng cấu trúc file parquet gốc của bạn
-raw_schema = StructType([
-    StructField("timestamp_start", StringType(), True),
-    StructField("label2", StringType(), True),
-    StructField("log_data-types", StringType(), True),
-    StructField("network_protocols_src", StringType(), True),
-    StructField("network_protocols_dst", StringType(), True),
-    # ... Thêm các cột raw khác vào đây
-])
+raw_schema = raw_schema  # Đã được định nghĩa trong spark_schema.py, đảm bảo khớp với cấu trúc JSON từ Kafka
 
-# Schema đầu ra (từ hàm mapInPandas ra Topic processed_flows) - Phải khớp 137 cột
-output_schema = StructType([
-    StructField("timestamp", FloatType(), True),
-    StructField("label", IntegerType(), True),
-    StructField("log_type_array", FloatType(), True),
-    StructField("log_type_numeric", FloatType(), True),
-    StructField("log_type_string", FloatType(), True),
-    StructField("src_proto_arp", FloatType(), True),
-    # ... Định nghĩa toàn bộ 137 cột (float/int) vào đây
-])
+# Schema đầu ra (từ hàm mapInPandas ra Topic processed_flows) - Phải khớp 138 cột
+output_schema = raw_schema
 
 # ==========================================
 # 3. HÀM XỬ LÝ MICRO-BATCH (Pandas UDF)
@@ -48,26 +34,35 @@ def parse_string_to_list(val):
         return val if isinstance(val, list) else []
     except (ValueError, SyntaxError):
         return []
+    
+def map_to_frequent(proto_list,freq_set):
+    res = set()
+    for p in proto_list:
+        if p in freq_set:
+            res.add(p)
+        else:
+            res.add("other")
+    return list(res)
 
 def preprocess_micro_batch(iterator):
     # Khởi tạo artifacts một lần trên mỗi Worker để tối ưu RAM
-    scaler = joblib.load("/app/artifacts/quantile_scaler.joblib")
-    le = joblib.load("/app/artifacts/label_encoder.joblib")
-    cols_to_drop = joblib.load("/app/artifacts/dropped_columns.joblib")
-    
+    scaler = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\quantile_scaler.pkl")
+    cols_to_drop = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\cols_to_drop.pkl")
+    numeric_cols = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\numeric_columns.pkl")
     # Load các MultiLabelBinarizer đã fit từ lúc train
-    mlb_log = joblib.load("/app/artifacts/mlb_log_types.joblib")
-    mlb_src = joblib.load("/app/artifacts/mlb_src_proto.joblib")
-    mlb_dst = joblib.load("/app/artifacts/mlb_dst_proto.joblib")
+    mlb_log = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\mlb_log_data_types.pkl")
+    mlb_src = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\mlb_network_protocols_src.pkl")
+    mlb_dst = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\mlb_network_protocols_dst.pkl")
+    freq_src_protos = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\freq_network_protocols_src.pkl")
+    freq_dst_protos = joblib.load(r"C:\Users\Admin\Downloads\IoT Dataset\CCIOT\saved_preprocessed\freq_network_protocols_dst.pkl")
     
     for pdf in iterator:
         if pdf.empty:
             yield pdf
             continue
-            
-        # A. Đổi tên cột
-        if "timestamp_start" in pdf.columns:
-            pdf.rename(columns={"timestamp_start": "timestamp", "label2": "label"}, inplace=True)
+        current_drop = [c for c in cols_to_drop if c in pdf.columns]
+        pdf.drop(columns=current_drop, inplace=True, errors='ignore')
+
             
         # B. Parse list và áp dụng One-hot encoding (MultiLabelBinarizer)
         if 'log_data-types' in pdf.columns:
@@ -79,31 +74,26 @@ def preprocess_micro_batch(iterator):
 
         if 'network_protocols_src' in pdf.columns:
             parsed = pdf['network_protocols_src'].apply(parse_string_to_list)
-            bin_matrix = mlb_src.transform(parsed)
+            grouped = parsed.apply(lambda x: map_to_frequent(x, freq_src_protos))
+            bin_matrix = mlb_src.transform(grouped)
             new_cols = [f"src_proto_{c}" for c in mlb_src.classes_]
             df_bin = pd.DataFrame(bin_matrix, columns=new_cols, index=pdf.index)
             pdf = pd.concat([pdf, df_bin], axis=1).drop(columns=['network_protocols_src'])
 
         if 'network_protocols_dst' in pdf.columns:
             parsed = pdf['network_protocols_dst'].apply(parse_string_to_list)
-            bin_matrix = mlb_dst.transform(parsed)
+            grouped = parsed.apply(lambda x: map_to_frequent(x, freq_dst_protos))
+            bin_matrix = mlb_dst.transform(grouped)
             new_cols = [f"dst_proto_{c}" for c in mlb_dst.classes_]
             df_bin = pd.DataFrame(bin_matrix, columns=new_cols, index=pdf.index)
             pdf = pd.concat([pdf, df_bin], axis=1).drop(columns=['network_protocols_dst'])
 
-        # C. Xóa các cột không cần thiết
-        current_drop = [c for c in cols_to_drop if c in pdf.columns]
-        pdf.drop(columns=current_drop, inplace=True, errors='ignore')
+        if "timestamp_start" in pdf.columns:
+            pdf.rename(columns={"timestamp_start": "timestamp"}, inplace=True)
 
-        # D. Xử lý Label (Nếu có luồng nhãn đi kèm để test)
-        if 'label' in pdf.columns:
-            # Xử lý nhãn lạ bằng cách gán về nhãn benign (hoặc nhãn mặc định lớp 0)
-            known_classes = set(le.classes_)
-            pdf['label'] = pdf['label'].map(lambda x: x if x in known_classes else le.classes_[0])
-            pdf['label'] = le.transform(pdf['label'])
 
         # E. Lấy danh sách cột số và áp dụng QuantileTransformer
-        numeric_cols = pdf.select_dtypes(include=['number']).columns.tolist()
+        numeric_cols = numeric_cols
         if 'label' in numeric_cols: numeric_cols.remove('label')
         if 'timestamp' in numeric_cols: numeric_cols.remove('timestamp')
         
@@ -111,6 +101,8 @@ def preprocess_micro_batch(iterator):
         # (Khuyến nghị: Nên lưu danh sách numeric_cols lúc train ra joblib và dùng lại ở đây)
         pdf[numeric_cols] = scaler.transform(pdf[numeric_cols])
         
+        expected_cols = output_schema.fieldNames()
+        pdf = pdf[expected_cols].fillna(0)
         # Trả về dataframe Pandas cho Spark
         yield pdf
 

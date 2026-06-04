@@ -27,3 +27,4 @@ CCIOT/test.csv
 CCIOT/train.csv
 CCIOT/valid.csv*.pkl
 tcp_based_training_model/SOTA/saved_models_xids/
+CCIOT/saved_preprocessed/
