@@ -2,7 +2,7 @@ import torch
 import xgboost as xgb
 import numpy as np
 
-from .gnn_model import GAT_Embedder
+from .gat_model import GAT_Embedder
 from .seq_model import CNN_BiLSTM_Attention
 
 class EnsembleManager:
@@ -13,9 +13,8 @@ class EnsembleManager:
         self.gnn = GAT_Embedder(in_channels=137, num_classes=8).to(self.device)
         self.seq = CNN_BiLSTM_Attention(num_features=137, num_classes=8).to(self.device)
         
-        # Load weights cho PyTorch (Thay đường dẫn bằng file thực tế của bạn)
-        # self.gnn.load_state_dict(torch.load('artifacts/gnn_weights.pth', map_location=self.device))
-        # self.seq.load_state_dict(torch.load('artifacts/seq_weights.pth', map_location=self.device))
+        self.gnn.load_state_dict(torch.load('artifacts/gnn_weights.pth', map_location=self.device))
+        self.seq.load_state_dict(torch.load('artifacts/seq_weights.pth', map_location=self.device))
         
         # Khóa mô hình ở chế độ suy luận (Tắt Dropout, khóa BatchNorm)
         self.gnn.eval()
@@ -23,10 +22,10 @@ class EnsembleManager:
         
         # 2. Khởi tạo 2 mô hình XGBoost
         self.xgb_bottom = xgb.Booster()
-        # self.xgb_bottom.load_model('artifacts/xgb_bottom.json')
+        self.xgb_bottom.load_model('artifacts/xgb_bottom.json')
         
         self.xgb_meta = xgb.Booster()
-        # self.xgb_meta.load_model('artifacts/xgb_meta.json')
+        self.xgb_meta.load_model('artifacts/xgb_meta.json')
 
     def predict(self, window_x, graph_x, edge_index, edge_attr=None, target_indices=None):
         """

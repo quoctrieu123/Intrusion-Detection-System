@@ -6,13 +6,21 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, IntegerType
 from spark_schema import raw_schema, output_schema
+import pyspark
+import os
+import sys
+os.environ["HADOOP_HOME"] = r'C:\hadoop-3.0.0'
+os.environ["PATH"] = os.environ["HADOOP_HOME"] + r'\bin;' + os.environ["PATH"]
+# Cấu hình cứng để luôn gọi đúng thư viện của bản 3.5.1
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
-# ==========================================
-# 1. KHỞI TẠO SPARK SESSION
-# ==========================================
+
+kafka_package = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
+
 spark = SparkSession.builder \
     .appName("CCIOT_Streaming_Preprocessor") \
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0") \
+    .config("spark.jars.packages", kafka_package) \
     .getOrCreate()
 
 # ==========================================
@@ -22,7 +30,7 @@ spark = SparkSession.builder \
 raw_schema = raw_schema  # Đã được định nghĩa trong spark_schema.py, đảm bảo khớp với cấu trúc JSON từ Kafka
 
 # Schema đầu ra (từ hàm mapInPandas ra Topic processed_flows) - Phải khớp 138 cột
-output_schema = raw_schema
+output_schema = output_schema  # Đã được định nghĩa trong spark_schema.py, đảm bảo có đủ 138 cột sau khi xử lý
 
 # ==========================================
 # 3. HÀM XỬ LÝ MICRO-BATCH (Pandas UDF)
@@ -129,7 +137,7 @@ query = df_processed \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:9092") \
     .option("topic", "processed_flows") \
-    .option("checkpointLocation", "/tmp/spark_checkpoints_cciot") \
+    .option("checkpointLocation", "file:///C:/spark_checkpoints_cciot") \
     .start()
 
 query.awaitTermination()
